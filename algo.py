@@ -1,171 +1,144 @@
-import winsound
 import sqlite3 as lite
 import random
 import pprint
 from timeit import default_timer as timer
 
-
-class player(object):
+class Player:
     def __init__(self, name, cost, position, points, dollarcost, roi):
         self.name = name
         self.cost = cost
         self.position = position
         self.points = points
-        self.dollarcost = dollarcost
         self.roi = roi
-
-
-def get_random_team(players, budget=35000000, f=8, d=6, c=4):
-    money_team = []
-    budget = budget
-    positions = {'F': f, 'D': d, 'C': c}
-
-    # while positions['F'] > 0 and positions['C'] > 0 and positions['D'] > 0:
-    while len(money_team) < (f+d+c):  # and budget > 1000000:
-        player = get_random_player(budget, players)
-
-        if not player:
-            return
-
-        if player not in money_team and positions[player.position] > 0:
-            money_team.append(player)
-            budget = budget - player.cost
-            positions[player.position] = positions[player.position] - 1
-
-    return money_team
-
-
-def get_random_player(budget, players):
-    playerData = list(filter(lambda x: x.cost <= budget, players))
-
-    length = len(playerData)
-    if length < 1:
-        return
-
-    index = random.randint(0, length-1)
-
-    try:
-        return playerData[index]
-    except:
-        print(budget)
-        print(index)
-        print(len(playerData))
-        return
-
 
 def get_all_players():
     con = lite.connect('test.db')
-    players = []
+    players_by_position = {'F': [], 'D': [], 'C': []}
 
     with con:
         con.row_factory = lite.Row
         cur = con.cursor()
-        # cur.execute("select * from players order by points desc limit 10")
-        cur.execute("select * from players where roi > 0.000015556")
-
+        # cur.execute("SELECT * FROM players WHERE roi > 0.000015556")
+        cur.execute("SELECT * FROM players")
         data = cur.fetchall()
-
+        
+        # Sort and categorize players by position
         for r in data:
-            players.append(player(*r))
+            p = Player(*r)
+            players_by_position[p.position].append(p)
+        
+        # Sort players in each position by ROI, descending
+        for pos in players_by_position:
+            players_by_position[pos].sort(key=lambda x: (-x.roi, x.cost))
 
-        return players
+    return players_by_position
 
+def get_random_team(players, budget=35000000, f=8, d=6, c=4, randomness_factor=0.2):
+    """Randomly selects a team with some perturbation for diversity."""
+    money_team = []
+    budget_remaining = budget
+    positions_needed = {'F': f, 'D': d, 'C': c}
 
-def print_team(team):
-    totalPoints = 0
-    for player in team:
-        pprint.pprint(player.name + " " +
-                      player.position + " " + str(player.points) + " " + str(player.cost))
-        totalPoints += player.points
+    # Select players with some randomness for diversity
+    for pos, num_needed in positions_needed.items():
+        for _ in range(num_needed):
+            # Introduce randomness: Choose a random player with a given probability
+            if random.random() < randomness_factor:
+                candidates = [p for p in players[pos] if p.cost <= budget_remaining and p not in money_team]
+                if candidates:
+                    player = random.choice(candidates)
+                    money_team.append(player)
+                    budget_remaining -= player.cost
+            else:
+                # Otherwise, pick the best available player as per greedy strategy
+                for player in players[pos]:
+                    if player.cost <= budget_remaining and player not in money_team:
+                        money_team.append(player)
+                        budget_remaining -= player.cost
+                        break  # Move on to the next player for the same position
 
-    pprint.pprint(totalPoints)
-
+    if len(money_team) == (f + d + c):
+        return money_team
+    return None
 
 def total_points(team):
-    totalPoints = 0
-    for player in team:
-        totalPoints += player.points
-
-    return totalPoints
-
+    return sum(player.points for player in team)
 
 def total_cost(team):
-    cost = 0
+    return sum(player.cost for player in team)
+
+def get_better_player(players, current_player):
+    # Get better players that cost the same or less
+    better_players = [p for p in players[current_player.position] if p.cost <= current_player.cost and p.points > current_player.points]
+    return sorted(better_players, key=lambda x: x.points, reverse=True)
+
+def get_better_team(team, players):
+    improved_team = team[:]
+    for idx, current_player in enumerate(improved_team):
+        better_players = get_better_player(players, current_player)
+        if better_players:
+            for new_player in better_players:
+                if new_player not in improved_team:
+                    improved_team[idx] = new_player
+                    break
+    return improved_team
+
+# Caching dictionary for already attempted team improvements
+player_cache = {}
+
+def iterative_improvement(team, players):
+    team_key = tuple(sorted(player.name for player in team))  # Unique team key for caching
+    if team_key in player_cache:
+        return player_cache[team_key]
+
+    new_team = get_better_team(team, players)
+    if total_points(new_team) > total_points(team):
+        player_cache[team_key] = new_team
+        return new_team
+    else:
+        player_cache[team_key] = team
+        return team
+
+def print_team(team):
+    total_points = sum(player.points for player in team)
     for player in team:
-        cost += player.cost
+        pprint.pprint(f"{player.name} {player.position} {player.points} {player.cost}")
+    pprint.pprint(f"Total Points: {total_points}")
+    pprint.pprint(f"Total Cost: {total_cost(team)}")
 
-    return cost
+# Main execution
+if __name__ == "__main__":
+    players_by_position = get_all_players()
+    top_teams = []  # List to store top N teams
+    max_teams_to_store = 5  # Adjust N to the number of top teams you want to store
+    seen_teams = set()  # To track unique teams
 
+    start = timer()
 
-def get_better_player(players, p):
-    playerData = list(filter(
-        lambda x: x.cost <= p.cost and x.position == p.position, players))
+    for _ in range(50000):
+        new_team = get_random_team(players_by_position, randomness_factor=0.2)  # Introduce randomness
+        if new_team:
+            improved_team = iterative_improvement(new_team, players_by_position)
+            team_key = tuple(sorted(player.name for player in improved_team))  # Unique key for the team
+            
+            if team_key not in seen_teams:
+                seen_teams.add(team_key)
+                team_points = total_points(improved_team)
 
-    # can't find any better ROI for this player
-    if len(playerData) < 1:
-        return
+                # Add team to top_teams and keep it sorted by points
+                top_teams.append((team_points, improved_team))
+                top_teams = sorted(top_teams, key=lambda x: x[0], reverse=True)
 
-    playerData = sorted(playerData, key=lambda x: x.points, reverse=True)
+                # Keep only the top N teams
+                if len(top_teams) > max_teams_to_store:
+                    top_teams.pop()
 
-    return playerData
+    end = timer()
 
+    # Display the top N teams
+    print(f"Top {max_teams_to_store} Teams:")
+    for i, (points, team) in enumerate(top_teams, start=1):
+        print(f"\nTeam {i}:")
+        print_team(team)
 
-def get_better_team(team):
-    pCount = 0
-    newTeam = team
-    for p in newTeam:
-        newPlayers = get_better_player(players, p)
-
-        for newPlayer in newPlayers:
-            if newPlayer not in newTeam and newPlayer.points > p.points:
-                # pprint.pprint("new: " + newPlayer.name + " " +
-                #               newPlayer.position + " " + str(newPlayer.points))
-                # pprint.pprint("old: " + p.name + " " +
-                #               p.position + " " + str(p.points))
-
-                newTeam[pCount] = newPlayer
-                break
-
-        pCount += 1
-
-    return newTeam
-
-
-count = 0
-masterTeam = []
-totalPoints = 0
-
-players = get_all_players()
-
-start = timer()
-while count < 10000:  # or totalPoints > 700:
-    count += 1
-
-    newTeam = get_random_team(players)
-
-    if newTeam:
-        newTeam = get_better_team(newTeam)
-        tp = total_points(newTeam)
-
-        if tp > totalPoints:
-            totalPoints = tp
-            masterTeam = newTeam
-            print(total_points(masterTeam))
-            print_team(masterTeam)
-
-
-end = timer()
-
-print_team(masterTeam)
-print(total_cost(masterTeam))
-print(end - start)
-
-masterTeam = get_better_team(masterTeam)
-masterTeam = sorted(masterTeam, key=lambda x: x.position, reverse=True)
-print_team(masterTeam)
-print(total_cost(masterTeam))
-
-
-frequency = 2500  # Set Frequency To 2500 Hertz
-duration = 700  # Set Duration To 1000 ms == 1 second
-# winsound.Beep(frequency, duration)
+    print(f"Total Time: {end - start:.2f} seconds")
