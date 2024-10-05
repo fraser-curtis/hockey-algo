@@ -17,7 +17,8 @@ with con:
 # print(df)
 # df.to_sql("players", con, if_exists='append', index=False)
 
-with open('players2024.csv', 'r') as fin:  # `with` statement available in 2.5+
+with open('nhltest.csv', 'r') as fin:  # `with` statement available in 2.5+
+# with open('players2024.csv', 'r') as fin:  # `with` statement available in 2.5+
 # with open('players.csv', 'r') as fin:  # `with` statement available in 2.5+
     # csv.DictReader uses first line in file for column headings by default
     dr = csv.DictReader(fin)  # comma is default delimiter

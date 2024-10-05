@@ -18,8 +18,8 @@ def get_all_players():
     with con:
         con.row_factory = lite.Row
         cur = con.cursor()
-        cur.execute("SELECT * FROM players WHERE roi > 0.000015556")
-        # cur.execute("SELECT * FROM players")
+        # cur.execute("SELECT * FROM players WHERE roi > 0.000015556")
+        cur.execute("SELECT * FROM players")
         data = cur.fetchall()
         
         # Sort and categorize players by position
